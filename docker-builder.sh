@@ -8,7 +8,7 @@ set -euo pipefail
 #######################################################################
 DOCKER_BASE_IMAGE="ubuntu:22.04"
 # DNS configuration, keep empty to skip
-DNS_SERVER=""
+DNS_SERVER="10.28.42.11"
 # HOST_TFTPBOOT is designed as a shared folder between host and docker, keep empty to skip
 HOST_TFTPBOOT="/tftpboot"
 # SSH_DIR allow you to use the same ssh key in host, it's useful for git over ssh
@@ -19,8 +19,12 @@ DOCKERFILE_PATH="./Dockerfile"
 # Ensure consistent path handling
 HOST_WORKSPACE=$(cd "$(dirname "$0")"/.. && pwd)
 TOPDIR_NAME=$(basename "$HOST_WORKSPACE")
-DOCKER_IMAGE_NAME="${TOPDIR_NAME}-${DOCKER_BASE_IMAGE//[:\/]/-}"
-CONTAINER_NAME="0${HOST_WORKSPACE//\//_}-builder"
+# remove leading /
+HOST_WORKSPACE_NAME="${HOST_WORKSPACE#/}"
+# replace / with _
+HOST_WORKSPACE_NAME="${HOST_WORKSPACE_NAME//\//_}"
+DOCKER_IMAGE_NAME="${HOST_WORKSPACE_NAME}-${DOCKER_BASE_IMAGE//[:\/]/-}"
+CONTAINER_NAME="${HOST_WORKSPACE_NAME}-builder"
 DOCKER_WORKSPACE="/work/${TOPDIR_NAME}"
 
 ARG_USER=$(whoami)
@@ -47,7 +51,8 @@ Usage: $(basename "$0") [options]
 Options:
   -h, --help              Show this help message
   -c, --clean             Clean old Docker image before building
-  -f, --dockerfile PATH   Specify path to Dockerfile (default: ./Dockerfile)
+  -f, --dockerfile <FILE> Specify path to Dockerfile (default: ./Dockerfile)
+  -d, --dns <DNS>         Specify dns server for docker
 EOF
   exit 0
 }
@@ -68,6 +73,14 @@ parse_arguments() {
           exit 1
         fi
         DOCKERFILE_PATH="$2"
+        shift 2
+        ;;
+      -d|--dns)
+        if [[ -z "$2" || "$2" == -* ]]; then
+          echo "Error: have to give dns server after $1" >&2
+          exit 1
+        fi
+        DNS_SERVER="$2"
         shift 2
         ;;
       *)
@@ -149,7 +162,7 @@ check_docker_status() {
   # Check if image exists
   DOCKER_IMAGE=$($DOCKER_CMD images -q "$DOCKER_IMAGE_NAME" 2>/dev/null || true)
   # Check if container exists
-  CONTAINER_ID=$($DOCKER_CMD ps -a -f name="${CONTAINER_NAME}" -q 2>/dev/null || true)
+  CONTAINER_ID=$($DOCKER_CMD ps -a --format '{{.Names}}' |grep -Fx "${CONTAINER_NAME}" 2>/dev/null || true)
 }
 
 build_docker_image() {
